@@ -85,6 +85,29 @@ function resolveBadgeApiUrl(username) {
   return `${resolveApiBase()}/api/badge/${safeUsername}`;
 }
 
+const HEATMAP_COLOR = '50b85e';
+const HEATMAP_BG = '10141a';
+
+function resolveHeatmapApiUrl(username) {
+  const safeUsername = encodeURIComponent(String(username || '').trim());
+  return `${resolveApiBase()}/api/heatmap/${safeUsername}`;
+}
+
+function resolveHeatmapDirectUrl(username) {
+  const safeUsername = String(username || '').trim();
+  const params = new URLSearchParams({
+    username: safeUsername,
+    theme: 'react-dark',
+    hide_border: 'true',
+    area: 'true',
+    color: HEATMAP_COLOR,
+    line: HEATMAP_COLOR,
+    point: HEATMAP_COLOR,
+    bg_color: HEATMAP_BG
+  });
+  return `https://github-readme-activity-graph.vercel.app/graph?${params.toString()}`;
+}
+
 function truncateSummary(text) {
   if (text.length <= MAX_SUMMARY_LENGTH) {
     return text;
@@ -204,6 +227,8 @@ export {
   resolveApiBase,
   resolveSummaryApiUrl,
   resolveBadgeApiUrl,
+  resolveHeatmapApiUrl,
+  resolveHeatmapDirectUrl,
   truncateSummary,
   validateSummary,
   callSummaryApiOnce,

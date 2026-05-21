@@ -1,5 +1,58 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { normalizeLocationForDisplay } from '../utils/location';
+import { resolveHeatmapApiUrl, resolveHeatmapDirectUrl } from '../utils/groq.js';
+
+function ContributionHeatmap({ username }) {
+  const [src, setSrc] = useState('');
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!username) {
+      setSrc('');
+      setFailed(false);
+      return;
+    }
+    setSrc(resolveHeatmapApiUrl(username));
+    setFailed(false);
+  }, [username]);
+
+  const handleError = () => {
+    const directUrl = resolveHeatmapDirectUrl(username);
+    if (src !== directUrl) {
+      setSrc(directUrl);
+      return;
+    }
+    setFailed(true);
+  };
+
+  if (!username) {
+    return (
+      <div className="font-mono text-[10px] text-outline uppercase text-center px-2">
+        No username available.
+      </div>
+    );
+  }
+
+  if (failed) {
+    return (
+      <div className="font-mono text-[10px] text-outline uppercase text-center px-2">
+        Heatmap unavailable
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={`${username} contribution chart`}
+      referrerPolicy="no-referrer"
+      loading="lazy"
+      decoding="async"
+      onError={handleError}
+      className="w-full h-full object-contain opacity-80 hover:opacity-100 transition-all drop-shadow-md"
+    />
+  );
+}
 
 export default function DevCard({ dev, onGenerateSummary, summary, loadingSummaryUser }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -100,11 +153,7 @@ export default function DevCard({ dev, onGenerateSummary, summary, loadingSummar
                 <div className="flex flex-col">
                   <h3 className="font-mono text-[10px] text-outline uppercase tracking-widest mb-4">Contribution_Heatmap</h3>
                   <div className="flex-grow bg-surface border border-outline-variant p-2 overflow-hidden flex justify-center items-center h-[160px]">
-                     <img 
-                       src={`https://ghchart.rshah.org/50b85e/${username}`} 
-                       alt={`${username} chart`} 
-                       className="w-full h-full object-contain opacity-80 hover:opacity-100 transition-all drop-shadow-md" 
-                     />
+                    <ContributionHeatmap username={username} />
                   </div>
                 </div>
 

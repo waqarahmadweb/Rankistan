@@ -323,6 +323,60 @@ async function callGroqWithKeyFallback(dev, apiKeys) {
   throw lastError || new Error('All Groq keys failed.');
 }
 
+const HEATMAP_UPSTREAM = 'https://github-readme-activity-graph.vercel.app/graph';
+const HEATMAP_COLOR = '50b85e';
+const HEATMAP_BG = '10141a';
+const GITHUB_USERNAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i;
+
+function buildHeatmapUpstreamUrl(username) {
+  const params = new URLSearchParams({
+    username,
+    theme: 'react-dark',
+    hide_border: 'true',
+    area: 'true',
+    color: HEATMAP_COLOR,
+    line: HEATMAP_COLOR,
+    point: HEATMAP_COLOR,
+    bg_color: HEATMAP_BG
+  });
+  return `${HEATMAP_UPSTREAM}?${params.toString()}`;
+}
+
+async function handleHeatmapRequest(request, env) {
+  const corsOrigin = resolveCorsOrigin(request, env);
+  const username = new URL(request.url).pathname.split('/').pop()?.trim();
+
+  if (request.method !== 'GET') {
+    return jsonResponse({ error: 'Method not allowed.' }, 405, corsOrigin);
+  }
+
+  if (!username || !GITHUB_USERNAME_RE.test(username)) {
+    return jsonResponse({ error: 'Invalid username.' }, 400, corsOrigin);
+  }
+
+  try {
+    const upstream = await fetch(buildHeatmapUpstreamUrl(username), {
+      cf: { cacheTtl: 3600 }
+    });
+
+    if (!upstream.ok) {
+      throw new Error(`Heatmap upstream returned ${upstream.status}.`);
+    }
+
+    const body = await upstream.arrayBuffer();
+    return new Response(body, {
+      headers: {
+        ...buildCorsHeaders(corsOrigin),
+        'Content-Type': upstream.headers.get('Content-Type') || 'image/svg+xml',
+        'Cache-Control': 'public, max-age=3600'
+      }
+    });
+  } catch (error) {
+    console.error(`Heatmap proxy failed for ${username}: ${error.message}`);
+    return jsonResponse({ error: 'Heatmap unavailable.' }, 502, corsOrigin);
+  }
+}
+
 async function handleBadgeRequest(request, env) {
   const corsOrigin = resolveCorsOrigin(request, env);
   const username = new URL(request.url).pathname.split('/').pop()?.toLowerCase();
@@ -389,6 +443,10 @@ export default {
 
     if (url.pathname.startsWith('/api/badge/')) {
       return handleBadgeRequest(request, env);
+    }
+
+    if (url.pathname.startsWith('/api/heatmap/')) {
+      return handleHeatmapRequest(request, env);
     }
 
     if (url.pathname !== '/api/dev-summary') {
