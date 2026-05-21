@@ -194,7 +194,7 @@ export default function Leaderboard({ searchTerm = '', onSearchChange, onChangeT
               <button
                 type="button"
                 onClick={() => exportCSV(filteredLeaderboard)}
-                className="md:hidden flex flex-1 basis-0 min-w-0 items-center justify-center gap-2 bg-surface-container-high border border-outline-variant px-4 py-2 font-mono text-xs hover:bg-surface-container-highest transition-colors"
+                className="md:hidden flex flex-1 basis-0 min-w-0 items-center justify-center gap-2 bg-primary text-on-primary px-4 py-2 font-mono text-xs active:scale-95 transition-all"
               >
                 <span className="material-symbols-outlined text-sm">download</span>
                 <span className="truncate">EXPORT CSV</span>

@@ -24,7 +24,7 @@ export default function Header({ activeTab, onChangeTab, searchTerm, onSearchCha
             className="w-9 h-9 object-contain"
           />
           <span
-            className="text-[#a2c9ff] text-[1.7rem] md:text-[2rem] leading-none"
+            className="text-[#a2c9ff] text-[2.125rem] md:text-[2rem] leading-none"
             style={{ fontFamily: "'Waltograph', 'Space Grotesk', sans-serif" }}
           >
             Rankistan

@@ -8,14 +8,17 @@ import React from 'react';
  */
 export default function BadgeBanner({ onNavigateToBadge }) {
   return (
-    <div className="border border-outline-variant bg-surface-container-lowest flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 px-6 py-4">
-      <div className="flex items-center gap-4 min-w-0">
-        <span className="material-symbols-outlined text-secondary shrink-0 text-3xl leading-none">shield</span>
-        <div className="min-w-0">
-          <div className="font-mono text-[10px] text-secondary uppercase tracking-widest mb-1">New Feature</div>
-          <p className="font-body text-sm text-on-surface-variant leading-snug">
+    <div className="w-full border border-outline-variant bg-surface-container-lowest flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-4 sm:pl-5 sm:pr-7">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+        <div className="flex items-center gap-2.5 sm:contents">
+          <span className="material-symbols-outlined text-secondary shrink-0 text-2xl leading-none sm:text-3xl">shield</span>
+          <span className="font-mono text-[10px] uppercase tracking-widest text-secondary sm:hidden">New Feature</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 hidden font-mono text-[10px] uppercase tracking-widest text-secondary sm:block">New Feature</div>
+          <p className="font-body text-xs leading-relaxed text-on-surface-variant sm:text-sm sm:leading-snug">
             Flaunt your Rankistan rank in your GitHub README.{' '}
-            <span className="font-mono text-[11px] text-primary">
+            <span className="font-mono text-[10px] text-primary sm:text-[11px]">
               ranked_devs can embed a live badge powered by Rankistan.
             </span>
           </p>
@@ -24,7 +27,7 @@ export default function BadgeBanner({ onNavigateToBadge }) {
       <button
         type="button"
         onClick={onNavigateToBadge}
-        className="shrink-0 flex items-center gap-2 border border-secondary text-secondary font-mono text-[10px] uppercase tracking-widest px-4 py-2 hover:bg-secondary/10 transition-colors active:scale-95"
+        className="flex w-full min-h-11 shrink-0 items-center justify-center gap-2 border border-secondary px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest text-secondary transition-colors hover:bg-secondary/10 active:scale-95 sm:w-auto sm:min-h-0 sm:py-2"
       >
         <span className="material-symbols-outlined text-sm">arrow_forward</span>
         Get Your Badge
