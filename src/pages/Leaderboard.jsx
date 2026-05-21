@@ -4,6 +4,7 @@ import { CACHE_KEYS, cache } from '../utils/cache';
 import { normalizeLocationForDisplay } from '../utils/location';
 import { ensureLeaderboardTags, getAvailableTags } from '../utils/tags';
 import { generateDeveloperSummary } from '../utils/groq';
+import BadgeBanner from '../components/BadgeBanner';
 
 const SORT_OPTIONS = [
   { key: 'score_desc', label: 'SCORE DESC', fn: (a, b) => (b.score || 0) - (a.score || 0) },
@@ -39,7 +40,7 @@ function exportCSV(devs) {
   URL.revokeObjectURL(url);
 }
 
-export default function Leaderboard({ searchTerm = '', onSearchChange }) {
+export default function Leaderboard({ searchTerm = '', onSearchChange, onChangeTab }) {
   const [leaderboard, setLeaderboard] = useState([]);
   const [selectedTag, setSelectedTag] = useState('All');
   const [loading, setLoading] = useState(true);
@@ -223,6 +224,8 @@ export default function Leaderboard({ searchTerm = '', onSearchChange }) {
           </div>
         </div>
       </div>
+
+      {onChangeTab && <BadgeBanner onNavigateToBadge={() => onChangeTab('badge')} />}
 
       {loading ? (
           <div className="text-center py-20 font-mono text-tertiary animate-pulse">LOADING_DATA_STREAM...</div>

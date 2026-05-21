@@ -144,7 +144,7 @@ function validateSummary(text) {
 function buildCorsHeaders(corsOrigin = '*') {
   return {
     'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
   };
 }
@@ -323,6 +323,61 @@ async function callGroqWithKeyFallback(dev, apiKeys) {
   throw lastError || new Error('All Groq keys failed.');
 }
 
+async function handleBadgeRequest(request, env) {
+  const corsOrigin = resolveCorsOrigin(request, env);
+  const username = new URL(request.url).pathname.split('/').pop()?.toLowerCase();
+  const headers = {
+    ...buildCorsHeaders(corsOrigin),
+    'Content-Type': 'application/json',
+    'Cache-Control': 'public, max-age=300'
+  };
+
+  if (request.method !== 'GET') {
+    return jsonResponse({ error: 'Method not allowed.' }, 405, corsOrigin);
+  }
+
+  if (!username) {
+    return jsonResponse({ error: 'Missing username.' }, 400, corsOrigin);
+  }
+
+  try {
+    const response = await fetch('https://rankistan.dev/data.json', {
+      cf: { cacheTtl: 300 }
+    });
+    const data = await response.json();
+    const dev = (data.leaderboard || []).find(
+      (entry) => entry.username?.toLowerCase() === username
+    );
+
+    if (!dev) {
+      return new Response(JSON.stringify({
+        schemaVersion: 1,
+        label: 'Rankistan',
+        message: 'not ranked',
+        color: 'lightgrey'
+      }), { headers });
+    }
+
+    return new Response(JSON.stringify({
+      schemaVersion: 1,
+      label: 'Rankistan',
+      message: `rank #${dev.rank}`,
+      color: '1a7f4e',
+      labelColor: '0f6e56',
+      namedLogo: 'github',
+      logoColor: 'white',
+      cacheSeconds: 300
+    }), { headers });
+  } catch {
+    return new Response(JSON.stringify({
+      schemaVersion: 1,
+      label: 'Rankistan',
+      message: 'error',
+      color: 'red'
+    }), { status: 502, headers });
+  }
+}
+
 export default {
   async fetch(request, env) {
     const corsOrigin = resolveCorsOrigin(request, env);
@@ -330,6 +385,10 @@ export default {
 
     if (request.method === 'OPTIONS') {
       return jsonResponse({}, 204, corsOrigin);
+    }
+
+    if (url.pathname.startsWith('/api/badge/')) {
+      return handleBadgeRequest(request, env);
     }
 
     if (url.pathname !== '/api/dev-summary') {

@@ -54,6 +54,13 @@ export default function Header({ activeTab, onChangeTab, searchTerm, onSearchCha
           </button>
           <button 
             type="button"
+            onClick={() => changeTab('badge')}
+            className={`${activeTab === 'badge' ? 'text-[#a2c9ff] border-b-2 border-[#a2c9ff] pb-1' : 'text-[#8b919d] hover:text-[#a2c9ff]'} transition-colors duration-50`}
+          >
+            Badge
+          </button>
+          <button 
+            type="button"
             onClick={() => changeTab('about')}
             className={`${activeTab === 'about' ? 'text-[#a2c9ff] border-b-2 border-[#a2c9ff] pb-1' : 'text-[#8b919d] hover:text-[#a2c9ff]'} transition-colors duration-50`}
           >
