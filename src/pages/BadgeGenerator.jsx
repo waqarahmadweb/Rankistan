@@ -90,6 +90,7 @@ export default function BadgeGenerator() {
   const [style, setStyle] = useState("flat");
   const [fmt, setFmt] = useState("md");
   const [rank, setRank] = useState(null);
+  const [avatarUrl, setAvatarUrl] = useState(null);
   const [lookupState, setLookupState] = useState("idle"); // idle | loading | found | notfound | error
   const inputRef = useRef(null);
   const debounceRef = useRef(null);
@@ -101,6 +102,7 @@ export default function BadgeGenerator() {
   useEffect(() => {
     if (!displayUser) {
       setRank(null);
+      setAvatarUrl(null);
       setLookupState("idle");
       return;
     }
@@ -109,6 +111,7 @@ export default function BadgeGenerator() {
     debounceRef.current = setTimeout(async () => {
       setLookupState("loading");
       setRank(null);
+      setAvatarUrl(null);
       try {
         if (!leaderboardRef.current) {
           const res = await fetch("./data.json");
@@ -121,6 +124,10 @@ export default function BadgeGenerator() {
         );
         if (dev) {
           setRank(dev.rank);
+          setAvatarUrl(
+            dev.avatar_url ||
+              `https://github.com/${displayUser}.png?size=80`,
+          );
           setLookupState("found");
         } else {
           setLookupState("notfound");
@@ -315,24 +322,31 @@ export default function BadgeGenerator() {
                     README.md — github.com/{displayUser || "yourusername"}
                   </span>
                 </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-[#21262d] border border-[#30363d] flex items-center justify-center shrink-0">
-                    <span className="font-mono text-[10px] text-[#8b949e]">
-                      {(displayUser || "YO").slice(0, 2).toUpperCase()}
-                    </span>
+                <div className="grid grid-cols-[2.5rem_1fr] gap-x-3 gap-y-2 items-center">
+                  <div className="row-span-2 w-10 h-10 bg-[#21262d] border border-[#30363d] flex items-center justify-center shrink-0 overflow-hidden self-center">
+                    {lookupState === "found" && avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={displayUser}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="font-mono text-[10px] text-[#8b949e]">
+                        {(displayUser || "YO").slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
                   </div>
-                  <div>
-                    <p className="font-mono text-sm text-[#e6edf3] mb-2">
-                      {displayUser || "yourusername"}
-                    </p>
-                    <img
-                      src={badgeUrl}
-                      alt="rank badge"
-                      style={{
-                        height: style === "for-the-badge" ? "28px" : "20px",
-                      }}
-                    />
-                  </div>
+                  <p className="font-mono text-sm text-[#e6edf3] leading-none">
+                    {displayUser || "yourusername"}
+                  </p>
+                  <img
+                    src={badgeUrl}
+                    alt="rank badge"
+                    className="block"
+                    style={{
+                      height: style === "for-the-badge" ? "28px" : "20px",
+                    }}
+                  />
                 </div>
               </div>
             </div>
