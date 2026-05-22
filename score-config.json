@@ -7,6 +7,12 @@
     "followers": 1,
     "publicRepos": 0.5
   },
+  "ACTIVITY_SCORING": {
+    "push": { "base": 2, "dailyCap": 15, "maxCountedPerDay": 20 },
+    "issue": { "base": 1.5, "dailyCap": 15 },
+    "pr": { "base": 4, "dailyCap": 25 },
+    "release": { "base": 5, "dailyCap": 20 }
+  },
   "STAR_WEIGHT": 2,
   "FALLBACK_ACTIVITY_WEIGHT": 3.125,
   "SIX_MONTHS_DAYS": 180,

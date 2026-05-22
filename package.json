@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "verify:activity": "node scripts/verify-activity-score.js",
     "lint": "eslint .",
     "preview": "vite preview",
     "cf:dev": "npx wrangler dev --config cloudflare/wrangler.toml",
