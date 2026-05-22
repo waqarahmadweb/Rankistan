@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 const SCORING_WEIGHTS = [
   { field: 'Stars', weight: '× 2', note: 'Capped at 250 to prevent outlier dominance' },
-  { field: 'Activity (30d)', weight: 'Dynamic', note: 'Releases (5), PRs (4), Pushes (2), Issues (1.5)' },
+  { field: 'Activity (30d)', weight: 'log2 curve', note: 'Per UTC day: base / log2(n+1), then daily cap. Push 15/day (20 counted), Issue 15, PR 25, Release 20' },
   { field: 'Followers', weight: '× 1', note: 'Capped at 500 to prevent outlier dominance' },
   { field: 'Public Repos', weight: '× 0.5', note: 'Breadth of open-source work' },
 ];
@@ -79,7 +79,7 @@ const FAQ = [
   { q: 'How often is the leaderboard updated?', a: 'Every hour. An external cron service triggers the GitHub Actions workflow 24 times per day — one batch per hour. A full cycle through all developers completes in 24 hours.' },
   { q: 'Why am I not on the leaderboard?', a: 'You need at least 30 meaningful contributions in the last 60 days, no gap longer than 30 days, an account older than 30 days, more than 3 public repos, and more than 1 follower. Your GitHub profile must also include "Pakistan" in the location field.' },
   { q: 'What counts as a "meaningful" contribution?', a: 'Only PushEvents, PullRequestEvents, IssuesEvents, and ReleaseEvents. Starring repos, forking, watching, or commenting do not count toward the contribution threshold.' },
-  { q: 'Why is my score lower than expected?', a: 'Stars are capped at 250 and followers are capped at 500 for scoring purposes. Accounts younger than 6 months receive a 0.5× penalty on their entire score. The score also weighs recent 30-day activity heavily.' },
+  { q: 'Why is my score lower than expected?', a: 'Stars are capped at 250 and followers are capped at 500 for scoring purposes. Recent activity uses diminishing returns (base / log2(n+1) per event per UTC day) with daily caps per type — spamming pushes in one day earns far less than steady work spread across the month. Only the first 20 pushes per day count. Accounts younger than 6 months receive a 0.5× penalty on their entire score.' },
   { q: 'What is the "new account penalty"?', a: 'If your GitHub account is less than 6 months old, your final score is halved (multiplied by 0.5). This prevents newly created accounts from dominating the board.' },
   { q: 'How does the scanner work at scale?', a: 'Rankistan runs a rolling daily scanner from year 2000 to present. It scans 40,000+ profiles, re-evaluates 20,000+ candidates for score changes, then applies strict activity gates before ranking.' },
   { q: 'How does AI summary generation work?', a: 'It is on-demand only. Expanding a card triggers a request to the Cloudflare Worker, which rate-limits and sanitizes input, calls Groq, validates output, and returns a cached summary per username.' },
@@ -88,7 +88,7 @@ const FAQ = [
   { q: 'Is this open source?', a: 'Yes. The full Rankistan codebase — pipeline scripts, scoring algorithm, and frontend — is on GitHub at github.com/Sudo-Ali-Dev/pakdev-index.' },
 ];
 
-export default function About() {
+export default function About({ onChangeTab }) {
   const [openFaq, setOpenFaq] = useState(null);
 
   return (
@@ -270,6 +270,17 @@ export default function About() {
                 Stars are capped at <span className="text-on-surface font-bold">250</span> and followers at <span className="text-on-surface font-bold">500</span> before weights are applied.
               </p>
             </div>
+
+            {typeof onChangeTab === 'function' && (
+              <button
+                type="button"
+                onClick={() => onChangeTab('evolution')}
+                className="mt-4 sm:mt-6 font-mono text-xs text-primary hover:text-tertiary transition-colors flex items-center gap-1 group"
+              >
+                View full scoring evolution
+                <span className="material-symbols-outlined text-sm group-hover:translate-x-0.5 transition-transform">arrow_forward</span>
+              </button>
+            )}
           </div>
 
           {/* Filters */}

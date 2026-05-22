@@ -49,7 +49,7 @@ The scanner is distributed across 24 hourly batches, so the full ecosystem is re
 | **Score** | `score-config.json` & `scripts/score.js` | Calculates a weighted score based on stars, recent activity, followers, and repo count using unified configuration |
 | **Leaderboard** | `scripts/write-leaderboard.js` | Writes the final ranked `data.json` with public-safe fields |
 
-During **Fetch**, each developer is assigned category tags (AI/ML, Web, DevOps, etc.) by matching bio, repos, and languages against [`src/utils/tag-keywords.json`](src/utils/tag-keywords.json) via [`src/utils/tag-matcher.cjs`](src/utils/tag-matcher.cjs). Tags flow through scoring into `public/data.json`. The leaderboard UI uses those tags when present and only recomputes them for older rows missing tags. Re-run the pipeline to refresh tags after keyword changes.
+During **Fetch**, each developer is assigned category tags (AI/ML, Web, DevOps, etc.) by matching bio, repos, and languages against [`src/utils/tag-keywords.json`](src/utils/tag-keywords.json) via [`src/utils/tag-matcher.js`](src/utils/tag-matcher.js). Tags flow through scoring into `public/data.json`. The leaderboard UI uses those tags when present and only recomputes them for older rows missing tags. Re-run the pipeline to refresh tags after keyword changes.
 
 ### Activity Filter
 
@@ -147,13 +147,23 @@ base_score = (stars × 2) + (activity_score) + (followers × 1) + (public_repos 
 > Since Rankistan aims to measure active open-source contributions and development work, the previously uncapped followers (and high star cap) were causing these metrics to overpower the score, making the leaderboard less balanced and unfairly overshadowing developers who actively commit, push, and review code.
 
 **Activity Score Breakdown**
-Recent events in the last 30 days are scored by activity type:
-- Releases: 5 points each
-- Pull Requests: 4 points each
-- Pushes: 2 points each
-- Issues: 1.5 points each
-(Fallback: 3.125 points per event for older cached data)
-```
+Recent events in the last 30 days use diminishing returns per UTC calendar day, per type:
+
+- Marginal points for the *n*th event of a type on a day: `base / log2(n + 1)`
+- Daily total per type is capped, then summed across all days in the 30-day window
+
+| Type | Base | Daily cap | Extra limit |
+|------|------|-----------|-------------|
+| Push | 2.0 | 15 pts | First 20 pushes/day counted |
+| Issue | 1.5 | 15 pts | — |
+| Pull Request | 4.0 | 25 pts | — |
+| Release | 5.0 | 20 pts | — |
+
+(Fallback: synthetic single-day curve from `event_counts_30d`, or 3.125 points per event when only flat `events_30d` exists)
+
+`events_30d` on the leaderboard remains a raw event count; score uses the capped curve above.
+
+For a plain-language history of how the score formula changed (and why), open the **Evolution** tab in the app.
 
 - Stars are capped at 250 and followers are capped at 500 to prevent outlier dominance
 - Accounts younger than 6 months receive a 0.5× penalty
