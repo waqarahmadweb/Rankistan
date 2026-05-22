@@ -26,15 +26,15 @@ const INTRO_BULLETS = [
 
 const FORMULA_PLAIN_ENGLISH = [
   'Stars and followers are capped (250 stars, 500 followers) before weights are applied.',
-  'Activity points use diminishing returns per UTC calendar dayâspamming the same event type in one day earns very little.',
-  'Accounts younger than 6 months receive half the base score (0.5Ã multiplier).',
+  'Activity points use diminishing returns per UTC calendar day - spamming the same event type in one day earns very little.',
+  'Accounts younger than 6 months receive half the base score (0.5x multiplier).',
 ];
 
 const CONSTANTS_ACROSS_ERAS = [
   'Only Push, Pull Request, Issue, and Release events count toward activity.',
   'Activity is scored over the last 30 days, grouped by UTC day, with a daily cap per event type.',
-  'The leaderboard may show a raw 30-day event countâthat number can be higher than the capped activity points in your score.',
-  'Accounts under 6 months old get a 0.5Ã multiplier on the full base score.',
+  'The leaderboard may show a raw 30-day event count - that number can be higher than the capped activity points in your score.',
+  'Accounts under 6 months old get a 0.5x multiplier on the full base score.',
 ];
 
 const BEHIND_THE_SCENES = [
@@ -59,14 +59,14 @@ const EVOLUTION_ENTRIES = [
     title: 'Everything counted the same',
     summary: 'One activity number for all event types in 30 days.',
     commit: 'a34ea46',
-    formula: 'base = min(stars, 2000)Ã2 + events_30dÃ3 + followersÃ1 + public_reposÃ0.5',
+    formula: 'base = min(stars, 2000)x2 + events_30dx3 + followersx1 + public_reposx0.5',
     changes: [
       'Your score combined stars, followers, public repo count, and a single 30-day activity total.',
-      'Every meaningful event (push, PR, issue, release) added the same amountâ3 points each.',
+      'Every meaningful event (push, PR, issue, release) added the same amount - 3 points each.',
       'Star cap was 2,000 (up to 4,000 star points). New accounts under 6 months got half the score.',
     ],
     reasoning:
-      'This was easy to understand, but volume could beat qualityâa push counted the same as a release, so busy accounts could climb without deeper contribution.',
+      'This was easy to understand, but volume could beat quality - a push counted the same as a release, so busy accounts could climb without deeper contribution.',
   },
   {
     id: 'v2-per-type',
@@ -74,22 +74,22 @@ const EVOLUTION_ENTRIES = [
     title: 'Stronger events count more',
     summary: 'Releases and PRs worth more than pushes; still linear over 30 days.',
     commit: 'b93d39c',
-    formula: 'activity = releasesÃ5 + PRsÃ4 + pushesÃ2 + issuesÃ1.5 (30d totals)',
+    formula: 'activity = releasesx5 + PRsx4 + pushesx2 + issuesx1.5 (30d totals)',
     changes: [
-      'Activity split into four types: releases (5Ã), pull requests (4Ã), pushes (2Ã), issues (1.5Ã).',
-      'Your total was still the sum across the whole monthâno per-day limit yet.',
+      'Activity split into four types: releases (5x), pull requests (4x), pushes (2x), issues (1.5x).',
+      'Your total was still the sum across the whole month - no per-day limit yet.',
       'Profiles missing per-type data used a neutral blended estimate until refreshed.',
     ],
     reasoning:
-      'Not all GitHub activity is equalâmerging code and shipping releases matter more than light pushes. Linear totals still let someone flood one event type in a single day and rack up points.',
+      'Not all GitHub activity is equal - merging code and shipping releases matter more than light pushes. Linear totals still let someone flood one event type in a single day and rack up points.',
   },
   {
     id: 'v3-star-cap',
     date: '2026-05-05',
     title: 'Star cap (250)',
-    summary: 'Maximum 500 points from stars (250 Ã 2).',
+    summary: 'Maximum 500 points from stars (250 x 2).',
     commit: 'c763841',
-    formula: 'max star contribution = 250 Ã 2 = 500 points',
+    formula: 'max star contribution = 250 x 2 = 500 points',
     changes: [
       'Only the first 250 stars count toward your score (was 2,000).',
       'Huge popular repos no longer dominate the board on stars alone.',
@@ -103,7 +103,7 @@ const EVOLUTION_ENTRIES = [
     title: 'Follower cap (500)',
     summary: 'Maximum 500 points from followers.',
     commit: '3a40c9b',
-    formula: 'max follower contribution = 500 Ã 1 = 500 points',
+    formula: 'max follower contribution = 500 x 1 = 500 points',
     changes: [
       'Follower count above 500 no longer adds extra score points.',
     ],
@@ -125,9 +125,9 @@ const EVOLUTION_ENTRIES = [
       'Spreading work across the month earns more than dumping hundreds of events on one day.',
     ],
     example:
-      'Example: 199 releases in a single day used to add ~995 activity points under linear scoring. Under current rules that day caps at about 20 release pointsâsteady contributors are not beaten by release farming.',
+      'Example: 199 releases in a single day used to add ~995 activity points under linear scoring. Under current rules that day caps at about 20 release points - steady contributors are not beaten by release farming.',
     reasoning:
-      'Linear monthly totals still rewarded gamingâmass releases or push spam in one day. Daily caps and diminishing returns reward consistent public work and limit burst farming.',
+      'Linear monthly totals still rewarded gaming - mass releases or push spam in one day. Daily caps and diminishing returns reward consistent public work and limit burst farming.',
   },
 ];
 
@@ -143,7 +143,7 @@ export default function Evolution() {
             <span className="text-primary font-normal tracking-normal">Evolution</span>
           </h1>
           <p className="font-body text-sm sm:text-base text-outline max-w-2xl leading-relaxed">
-            How Rankistan calculates your scoreâand why the rules changed over time to reward steady
+            How Rankistan calculates your score - and why the rules changed over time to reward steady
             open-source work, not bursts or fame metrics.
           </p>
         </div>
@@ -159,7 +159,7 @@ export default function Evolution() {
             {INTRO_BULLETS.map(({ label, text }) => (
               <li key={label} className="font-body text-xs sm:text-sm text-outline leading-relaxed">
                 <span className="text-on-surface font-medium">{label}</span>
-                <span className="text-outline"> â {text}</span>
+                <span className="text-outline">  -  {text}</span>
               </li>
             ))}
           </ul>
@@ -172,13 +172,13 @@ export default function Evolution() {
           </div>
           <div className="overflow-x-auto bg-surface-container-low border border-outline-variant p-3 sm:p-5 mb-4 font-mono text-xs sm:text-sm leading-relaxed">
             <div className="text-primary">
-              base_score = (min(stars, 250) Ã 2) + activity_score + (min(followers, 500) Ã 1) + (public_repos Ã 0.5)
+              base_score = (min(stars, 250) x 2) + activity_score + (min(followers, 500) x 1) + (public_repos x 0.5)
             </div>
             <div className="text-tertiary mt-2">
-              final_score = round(base_score Ã (account_age &lt; 6mo ? 0.5 : 1.0))
+              final_score = round(base_score x (account_age &lt; 6mo ? 0.5 : 1.0))
             </div>
             <div className="text-outline mt-3 text-[11px]">
-              activity_score = Î£ daily min(cap, Î£ base / log2(n+1)) over 30d, per type, UTC days
+              activity_score = SUM daily min(cap, SUM base / log2(n+1)) over 30d, per type, UTC days
             </div>
           </div>
           <div className="mb-4 space-y-2">
@@ -191,7 +191,7 @@ export default function Evolution() {
           <ul className="space-y-2 border-t border-outline-variant/50 pt-4">
             {CONSTANTS_ACROSS_ERAS.map((line) => (
               <li key={line} className="font-body text-xs text-outline leading-relaxed flex gap-2">
-                <span className="text-tertiary shrink-0">â</span>
+                <span className="text-tertiary shrink-0"> - </span>
                 <span>{line}</span>
               </li>
             ))}
@@ -203,7 +203,7 @@ export default function Evolution() {
           <h2 className="font-headline text-lg sm:text-xl font-bold tracking-tighter uppercase">
             How the formula changed
           </h2>
-          <span className="font-mono text-[10px] text-outline uppercase tracking-widest">// oldest â newest</span>
+          <span className="font-mono text-[10px] text-outline uppercase tracking-widest">// oldest to newest</span>
         </div>
 
         <ol className="relative border-l-2 border-outline-variant ml-3 sm:ml-4 space-y-0">
@@ -279,7 +279,7 @@ export default function Evolution() {
                           key={item}
                           className="font-body text-xs text-on-surface-variant leading-relaxed flex gap-2"
                         >
-                          <span className="text-primary shrink-0 mt-0.5">âº</span>
+                          <span className="text-primary shrink-0 mt-0.5">{'\u203a'}</span>
                           <span>{item}</span>
                         </li>
                       ))}
@@ -323,7 +323,7 @@ export default function Evolution() {
           </div>
 
           <div className="p-4 border border-outline-variant/50 bg-surface-container-low font-mono text-[10px] text-outline uppercase tracking-widest leading-relaxed">
-            <p>Scoring version: {SCORING_VERSION} · Last documented: {LAST_DOCUMENTED}</p>
+            <p>Scoring version: {SCORING_VERSION} | Last documented: {LAST_DOCUMENTED}</p>
             <p className="mt-2 normal-case tracking-normal font-body text-xs">
               Live weights:{' '}
               <a
