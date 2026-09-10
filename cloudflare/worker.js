@@ -1,12 +1,19 @@
+// The Durable Object class must be exported from the Worker entrypoint for
+// wrangler to bind it.
+export { RateLimiter } from './rate-limiter.js';
+
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const GROQ_MAX_TOKENS = 120;
-const GROQ_TEMPERATURE = 0.5;
-const GROQ_TIMEOUT_MS = 15000;
+const GROQ_MODEL = 'openai/gpt-oss-120b';
+const GROQ_MAX_COMPLETION_TOKENS = 800;
+const GROQ_TEMPERATURE = 0;
+const GROQ_REASONING_EFFORT = 'low';
+const GROQ_INCLUDE_REASONING = false;
+const GROQ_TIMEOUT_MS = 25000;
 const MIN_SUMMARY_LENGTH = 30;
 const MAX_SUMMARY_LENGTH = 400;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 20;
+const RATE_LIMIT_MAX_TRACKED_IPS = 10000;
 
 const REFUSAL_PREFIXES = ["i'm sorry", 'i cannot', 'as an ai'];
 
@@ -15,15 +22,31 @@ const SYSTEM_PROMPT = [
   'Write exactly 2 sentences describing this developer based on their GitHub activity.',
   'Be specific - mention their main technologies and what kind of projects they build.',
   'Do not use bullet points. Do not start with "This developer". Write in third person.',
-  'Use he/him or she/her pronouns based on the developer\'s name. Pay careful attention to the name — e.g. Muhammad, Ali, Ibrahim, Ahmed, Shayan are male; Fatima, Ayesha, Noor (female name) are female.',
-  'If the gender is truly ambiguous, use "they/them".'
+  // Pronouns come from the developer's own GitHub profile (the `pronouns` field
+  // exposed by the GraphQL API), carried through the pipeline into data.json.
+  // The original prompt told the model to infer gender from the name, which
+  // misgendered real people on a public leaderboard (#73). Using what someone
+  // declared about themselves is both correct and respectful; guessing is not.
+  'A "Pronouns:" line may be supplied. When it is, use exactly those pronouns throughout.',
+  'When no pronouns are supplied, do not guess and do not substitute a default:',
+  'use the developer name as the subject, or the @username when no name is given.',
+  'Never infer gender from a name, username, location, or project.'
 ].join(' ');
 
 const rateLimitByIp = new Map();
 
 function normalizeText(value, maxLength = 200) {
-  const text = value == null ? '' : String(value).trim();
-  return text.slice(0, maxLength);
+  const text = value == null ? '' : String(value);
+  // Every value that passes through here is interpolated into the LLM prompt
+  // by buildUserPrompt(). A newline lets a caller close the current field and
+  // inject their own instruction lines, so collapse control characters and
+  // runs of whitespace to single spaces before truncating.
+  return text
+    // eslint-disable-next-line no-control-regex -- stripping them is the point
+    .replace(/[\u0000-\u001F\u007F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
 }
 
 function normalizeLanguages(languages) {
@@ -55,6 +78,7 @@ function sanitizeDeveloper(rawDev) {
     username: normalizeText(rawDev?.username, 80),
     name: normalizeText(rawDev?.name, 120),
     location: normalizeText(rawDev?.location, 120),
+    pronouns: normalizeText(rawDev?.pronouns, 40),
     top_languages: normalizeLanguages(rawDev?.top_languages),
     total_stars: Number.isFinite(Number(rawDev?.total_stars)) ? Number(rawDev.total_stars) : 0,
     events_30d: Number.isFinite(Number(rawDev?.events_30d)) ? Number(rawDev.events_30d) : 0,
@@ -84,6 +108,11 @@ function buildUserPrompt(dev) {
   const location = normalizeText(dev?.location, 120);
   if (location) {
     lines[0] = `${lines[0]} from ${location}`;
+  }
+
+  const pronouns = normalizeText(dev?.pronouns, 40);
+  if (pronouns) {
+    lines.push(`Pronouns: ${pronouns}`);
   }
 
   const normalizedLanguages = normalizeLanguages(dev?.top_languages);
@@ -145,7 +174,10 @@ function buildCorsHeaders(corsOrigin = '*') {
   return {
     'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Headers': 'Content-Type',
+    // Responses here carry a per-request ACAO and some of them are cached.
+    // Without Vary, a cache can hand one origin's ACAO to a different origin.
+    'Vary': 'Origin'
   };
 }
 
@@ -189,23 +221,67 @@ function jsonResponse(body, status = 200, corsOrigin = '*') {
 }
 
 function getClientIp(request) {
-  const forwarded = request.headers.get('CF-Connecting-IP') || request.headers.get('x-forwarded-for') || 'unknown';
-  return forwarded.split(',')[0].trim() || 'unknown';
+  // Only CF-Connecting-IP is trustworthy here: Cloudflare sets it and a client
+  // cannot forge it. x-forwarded-for used to be accepted as a fallback, which
+  // made the rate-limit key caller-controlled - a request could pick a fresh
+  // key every time and never be limited, while also growing the Map without
+  // bound. An absent CF header now shares one bucket rather than escaping.
+  const ip = request.headers.get('CF-Connecting-IP');
+  return (ip && ip.trim()) || 'unknown';
 }
 
-function isRateLimited(ip) {
-  const now = Date.now();
+// Cloudflare's Rate Limiting binding is the authoritative counter. The Map
+// below is only a fallback: module-level state lives in a single Worker
+// isolate and is neither shared nor persistent, so the old implementation
+// enforced the limit per-isolate rather than per-IP (#65). Configure the
+// binding in wrangler.toml; without it this endpoint is only weakly
+// protected, and the leaderboard-membership check below is what actually
+// caps the cost of abuse.
+//
+// Note the binding is authoritative per Cloudflare location, not strictly
+// global - materially better than per-isolate, but not a hard global cap.
+// Rate limiting is delegated to a Durable Object (cloudflare/rate-limiter.js).
+// Cloudflare guarantees one instance per object ID and serialises requests to
+// it, so keying by client IP gives one authoritative, race-free counter per IP.
+//
+// The two previous approaches both measured as ineffective and are documented
+// in that file: a module-level Map (per-isolate, so a sequential caller was
+// never counted) and Cloudflare's Rate Limiting binding (returned success for
+// 30 consecutive requests against a 20/60s config, and for 10 against a 3/60s
+// config).
+//
+// Fails CLOSED. If the Durable Object is unreachable the request is rejected
+// rather than waved through: this endpoint spends money per call, so an
+// unavailable limiter must not become an open door.
+async function isRateLimited(request, env) {
+  const ip = getClientIp(request);
+  const namespace = env?.RATE_LIMITER;
 
-  for (const [key, timestamps] of rateLimitByIp.entries()) {
-    const recent = timestamps.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
-    if (recent.length === 0) {
-      rateLimitByIp.delete(key);
-    } else {
-      rateLimitByIp.set(key, recent);
-    }
+  if (!namespace || typeof namespace.idFromName !== 'function') {
+    console.error('RATE_LIMITER durable object binding is missing; rejecting.');
+    return true;
   }
 
-  const recent = (rateLimitByIp.get(ip) || []).filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
+  try {
+    const stub = namespace.get(namespace.idFromName(ip));
+    const response = await stub.fetch('https://rate-limiter/check');
+    const { allowed } = await response.json();
+    return allowed !== true;
+  } catch (error) {
+    console.error(`RATE_LIMITER unavailable for ${ip}; rejecting. ${error.message}`);
+    return true;
+  }
+}
+
+function isRateLimitedInIsolate(ip) {
+  const now = Date.now();
+  const cutoff = now - RATE_LIMIT_WINDOW_MS;
+
+  // Only the requesting key is read. The previous version rewrote *every*
+  // entry in the Map on *every* request, so a spray of distinct keys was a
+  // CPU amplifier on top of the unbounded-memory problem.
+  const recent = (rateLimitByIp.get(ip) || []).filter((ts) => ts > cutoff);
+
   if (recent.length >= RATE_LIMIT_MAX_REQUESTS) {
     rateLimitByIp.set(ip, recent);
     return true;
@@ -213,7 +289,79 @@ function isRateLimited(ip) {
 
   recent.push(now);
   rateLimitByIp.set(ip, recent);
+
+  // Amortised eviction: sweep only once the Map exceeds the cap, so memory
+  // stays bounded without paying a scan per request.
+  if (rateLimitByIp.size > RATE_LIMIT_MAX_TRACKED_IPS) {
+    for (const [key, timestamps] of rateLimitByIp) {
+      if (timestamps.length === 0 || timestamps[timestamps.length - 1] <= cutoff) {
+        rateLimitByIp.delete(key);
+      }
+    }
+
+    // If every tracked key is still inside the window, the staleness sweep
+    // above frees nothing, `size` stays over the cap, and it then runs on
+    // every subsequent request - reinstating the O(n)-per-request scan it was
+    // meant to remove. Map iterates in insertion order, so dropping from the
+    // front evicts the oldest keys and puts a hard bound on both.
+    for (const key of rateLimitByIp.keys()) {
+      if (rateLimitByIp.size <= RATE_LIMIT_MAX_TRACKED_IPS) break;
+      rateLimitByIp.delete(key);
+    }
+  }
+
   return false;
+}
+
+const LEADERBOARD_URL = 'https://rankistan.dev/data.json';
+const LEADERBOARD_CACHE_SECONDS = 300;
+
+// Shared by /api/badge and /api/dev-summary. Returns the leaderboard entry for
+// a username, or null if that developer is not ranked. Throws on a failed
+// fetch so callers can distinguish "not ranked" from "lookup unavailable" -
+// the badge route previously called response.json() without checking
+// response.ok, so a 404 HTML body surfaced as a generic error badge.
+// data.json is ~1.6 MB / 1000 rows. cf.cacheTtl avoids the network hop but not
+// the JSON.parse, and this now runs on every /api/dev-summary request - in the
+// same invocation as the Groq call, against the Workers CPU budget. Memoise the
+// parsed index per isolate so the parse is paid once per TTL rather than once
+// per request.
+let leaderboardIndex = null;
+let leaderboardIndexAt = 0;
+
+async function loadLeaderboardIndex() {
+  const now = Date.now();
+  if (leaderboardIndex && now - leaderboardIndexAt < LEADERBOARD_CACHE_SECONDS * 1000) {
+    return leaderboardIndex;
+  }
+
+  const response = await fetch(LEADERBOARD_URL, {
+    cf: { cacheTtl: LEADERBOARD_CACHE_SECONDS }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Leaderboard fetch failed with ${response.status}.`);
+  }
+
+  const data = await response.json();
+  if (!Array.isArray(data?.leaderboard)) {
+    throw new Error('Leaderboard payload has no leaderboard array.');
+  }
+
+  const index = new Map();
+  for (const entry of data.leaderboard) {
+    const login = String(entry?.username || '').toLowerCase();
+    if (login) index.set(login, entry);
+  }
+
+  leaderboardIndex = index;
+  leaderboardIndexAt = now;
+  return index;
+}
+
+async function findRankedDeveloper(username) {
+  const index = await loadLeaderboardIndex();
+  return index.get(username.toLowerCase()) || null;
 }
 
 const GROQ_KEY_SLOTS = 8;
@@ -262,8 +410,10 @@ async function callGroqOnce(dev, apiKey) {
       },
       body: JSON.stringify({
         model: GROQ_MODEL,
-        max_tokens: GROQ_MAX_TOKENS,
+        max_completion_tokens: GROQ_MAX_COMPLETION_TOKENS,
         temperature: GROQ_TEMPERATURE,
+        reasoning_effort: GROQ_REASONING_EFFORT,
+        include_reasoning: GROQ_INCLUDE_REASONING,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: buildUserPrompt(dev) }
@@ -319,7 +469,13 @@ async function callGroqWithKeyFallback(dev, apiKeys) {
 const HEATMAP_UPSTREAM = 'https://github-readme-activity-graph.vercel.app/graph';
 const HEATMAP_COLOR = '50b85e';
 const HEATMAP_BG = '10141a';
+const HEATMAP_CACHE_SECONDS = 3600;
+const HEATMAP_ERROR_MARKERS = ["Can't fetch any contribution", 'Please check your username'];
 const GITHUB_USERNAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i;
+
+function isHeatmapErrorCard(svg) {
+  return HEATMAP_ERROR_MARKERS.some((marker) => svg.includes(marker));
+}
 
 function buildHeatmapUpstreamUrl(username) {
   const params = new URLSearchParams({
@@ -335,6 +491,19 @@ function buildHeatmapUpstreamUrl(username) {
   return `${HEATMAP_UPSTREAM}?${params.toString()}`;
 }
 
+// The upstream is a third party we do not control. Serve its bytes only as an
+// SVG image, never with a Content-Type it chose: reflecting that header meant a
+// compromised or changed upstream could return text/html and have us serve
+// attacker-influenced markup from our own origin. nosniff and a deny-all CSP
+// are defence in depth for the same reason (the app embeds this via <img>, so
+// scripts would not run there, but a direct visit to the Worker URL would).
+const HEATMAP_SVG_HEADERS = {
+  'Content-Type': 'image/svg+xml; charset=utf-8',
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+  'Cache-Control': `public, max-age=${HEATMAP_CACHE_SECONDS}`
+};
+
 async function handleHeatmapRequest(request, env) {
   const corsOrigin = resolveCorsOrigin(request, env);
   const username = new URL(request.url).pathname.split('/').pop()?.trim();
@@ -347,26 +516,64 @@ async function handleHeatmapRequest(request, env) {
     return jsonResponse({ error: 'Invalid username.' }, 400, corsOrigin);
   }
 
+  const upstreamUrl = buildHeatmapUpstreamUrl(username);
+  const cache = typeof caches === 'undefined' ? null : caches.default;
+  const cacheKey = new Request(upstreamUrl, { method: 'GET' });
+
+  // Only the SVG body is cached, with no CORS header on it. Previously the
+  // cached entry carried the Access-Control-Allow-Origin of whichever origin
+  // asked first, while the cache key (the upstream URL) had no Origin in it -
+  // so that first caller's ACAO was replayed to everyone for an hour.
+  const serve = (svg) =>
+    new Response(svg, { headers: { ...buildCorsHeaders(corsOrigin), ...HEATMAP_SVG_HEADERS } });
+
   try {
-    const upstream = await fetch(buildHeatmapUpstreamUrl(username), {
-      cf: { cacheTtl: 3600 }
+    const cached = cache ? await cache.match(cacheKey) : null;
+    if (cached) {
+      const cachedSvg = await cached.text();
+
+      if (!isHeatmapErrorCard(cachedSvg)) {
+        return serve(cachedSvg);
+      }
+
+      await cache.delete(cacheKey);
+    }
+
+    // caches.default is documented as having no effect on *.workers.dev
+    // deployments, and the frontend points at the workers.dev hostname - so the
+    // Cache API block above is inert in production today. This cf hint is a
+    // separate mechanism and does work there, which matters because every
+    // uncached hit lands on the third-party upstream that rate-limits us into
+    // the error cards this route exists to suppress.
+    const upstream = await fetch(upstreamUrl, {
+      cf: { cacheTtl: HEATMAP_CACHE_SECONDS }
     });
 
     if (!upstream.ok) {
       throw new Error(`Heatmap upstream returned ${upstream.status}.`);
     }
 
-    const body = await upstream.arrayBuffer();
-    return new Response(body, {
-      headers: {
-        ...buildCorsHeaders(corsOrigin),
-        'Content-Type': upstream.headers.get('Content-Type') || 'image/svg+xml',
-        'Cache-Control': 'public, max-age=3600'
-      }
-    });
+    const svg = await upstream.text();
+
+    if (isHeatmapErrorCard(svg)) {
+      throw new Error('Heatmap upstream returned an error card.');
+    }
+
+    if (cache) {
+      await cache.put(cacheKey, new Response(svg, { headers: HEATMAP_SVG_HEADERS }));
+    }
+
+    return serve(svg);
   } catch (error) {
     console.error(`Heatmap proxy failed for ${username}: ${error.message}`);
-    return jsonResponse({ error: 'Heatmap unavailable.' }, 502, corsOrigin);
+    return new Response(JSON.stringify({ error: 'Heatmap unavailable.' }), {
+      status: 502,
+      headers: {
+        ...buildCorsHeaders(corsOrigin),
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store'
+      }
+    });
   }
 }
 
@@ -376,25 +583,22 @@ async function handleBadgeRequest(request, env) {
   const headers = {
     ...buildCorsHeaders(corsOrigin),
     'Content-Type': 'application/json',
-    'Cache-Control': 'public, max-age=300'
+    'Cache-Control': `public, max-age=${LEADERBOARD_CACHE_SECONDS}`
   };
 
   if (request.method !== 'GET') {
     return jsonResponse({ error: 'Method not allowed.' }, 405, corsOrigin);
   }
 
-  if (!username) {
-    return jsonResponse({ error: 'Missing username.' }, 400, corsOrigin);
+  // The heatmap route already validated usernames with this regex; the badge
+  // route only checked for non-empty, which was an inconsistency rather than
+  // an exploit. Validate before spending a leaderboard fetch on it.
+  if (!username || !GITHUB_USERNAME_RE.test(username)) {
+    return jsonResponse({ error: 'Invalid username.' }, 400, corsOrigin);
   }
 
   try {
-    const response = await fetch('https://rankistan.dev/data.json', {
-      cf: { cacheTtl: 300 }
-    });
-    const data = await response.json();
-    const dev = (data.leaderboard || []).find(
-      (entry) => entry.username?.toLowerCase() === username
-    );
+    const dev = await findRankedDeveloper(username);
 
     if (!dev) {
       return new Response(JSON.stringify({
@@ -407,15 +611,16 @@ async function handleBadgeRequest(request, env) {
 
     return new Response(JSON.stringify({
       schemaVersion: 1,
-      label: 'Rankistan',
+      label: `Rankistan @${dev.username}`,
       message: `rank #${dev.rank}`,
       color: '1a7f4e',
       labelColor: '0f6e56',
       namedLogo: 'github',
       logoColor: 'white',
-      cacheSeconds: 300
+      cacheSeconds: LEADERBOARD_CACHE_SECONDS
     }), { headers });
-  } catch {
+  } catch (error) {
+    console.error(`Badge lookup failed for ${username}: ${error.message}`);
     return new Response(JSON.stringify({
       schemaVersion: 1,
       label: 'Rankistan',
@@ -450,8 +655,7 @@ export default {
       return jsonResponse({ error: 'Method not allowed.' }, 405, corsOrigin);
     }
 
-    const ip = getClientIp(request);
-    if (isRateLimited(ip)) {
+    if (await isRateLimited(request, env)) {
       return jsonResponse({ error: 'Rate limit exceeded. Try again in a minute.' }, 429, corsOrigin);
     }
 
@@ -465,8 +669,25 @@ export default {
     const rawDev = body?.dev && typeof body.dev === 'object' ? body.dev : body;
     const dev = sanitizeDeveloper(rawDev || {});
 
-    if (!dev.username) {
-      return jsonResponse({ error: 'Missing dev.username.' }, 400, corsOrigin);
+    // sanitizeDeveloper() only coerces and clamps; it never validated the
+    // username, unlike the heatmap route. Validate the shape first.
+    if (!dev.username || !GITHUB_USERNAME_RE.test(dev.username)) {
+      return jsonResponse({ error: 'Invalid dev.username.' }, 400, corsOrigin);
+    }
+
+    // This endpoint spends real money per call. Requiring the developer to be
+    // on the leaderboard bounds who can be summarised to a known ~1000-row set,
+    // and mirrors what /api/badge already does.
+    let rankedDev;
+    try {
+      rankedDev = await findRankedDeveloper(dev.username);
+    } catch (error) {
+      console.error(`Leaderboard lookup failed for ${dev.username}: ${error.message}`);
+      return jsonResponse({ error: 'Leaderboard lookup unavailable.' }, 503, corsOrigin);
+    }
+
+    if (!rankedDev) {
+      return jsonResponse({ error: 'Developer is not on the leaderboard.' }, 404, corsOrigin);
     }
 
     const apiKeys = getGroqApiKeys(env);
@@ -475,11 +696,38 @@ export default {
     }
 
     try {
-      const summary = await callGroqWithKeyFallback(dev, apiKeys);
+      // Build the prompt from OUR published leaderboard row, not from the
+      // request body. The caller only chooses *which* ranked developer to
+      // summarise; every value that reaches the model comes from data.json.
+      // Passing the client's object here would have left name, location,
+      // top_languages and every repo name/description attacker-controlled,
+      // with only control-character stripping standing between a caller and
+      // the prompt.
+      const summary = await callGroqWithKeyFallback(sanitizeDeveloper(rankedDev), apiKeys);
       return jsonResponse({ summary }, 200, corsOrigin);
     } catch (error) {
       console.error(`cloudflare worker failed for ${dev.username}: ${error.message}`);
       return jsonResponse({ error: 'Failed to generate summary.' }, 502, corsOrigin);
     }
   }
+};
+
+// Exported for unit tests only. The Workers runtime uses the default export as
+// its entrypoint and ignores additional named exports, so this has no runtime
+// effect on the deployed Worker.
+export {
+  normalizeText,
+  normalizeLanguages,
+  normalizeTopRepos,
+  sanitizeDeveloper,
+  buildUserPrompt,
+  truncateSummary,
+  validateSummary,
+  resolveCorsOrigin,
+  buildCorsHeaders,
+  getClientIp,
+  isRateLimitedInIsolate,
+  isHeatmapErrorCard,
+  GITHUB_USERNAME_RE,
+  RATE_LIMIT_MAX_REQUESTS
 };

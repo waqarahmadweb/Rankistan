@@ -94,7 +94,7 @@ async function loadDotEnv(repoRoot) {
     }
 
     const key = line.slice(0, equalsIndex).trim();
-    const value = line.slice(equalsIndex + 1).trim().replace(/^['\"]|['\"]$/g, '');
+    const value = line.slice(equalsIndex + 1).trim().replace(/^['"]|['"]$/g, '');
 
     if (key && process.env[key] === undefined) {
       process.env[key] = value;
@@ -192,7 +192,7 @@ async function githubRequest(endpoint, token, options = {}) {
         Accept: 'application/vnd.github+json',
         Authorization: `Bearer ${token}`,
         'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'pakdev-index-fetch-devs'
+        'User-Agent': 'rankistan-fetch-devs'
       },
       signal: controller.signal
     });
@@ -342,7 +342,7 @@ async function discoverUsers(token, batches) {
           }
 
           shardSuccess = true;
-          break;
+          break; // Succeeded, Break out of the retry loop.
         } catch (error) {
           if (attempt === 1) {
             console.warn(
@@ -351,8 +351,13 @@ async function discoverUsers(token, batches) {
             );
             await sleep(SEARCH_RETRY_DELAY_MS);
           } else {
-            console.error(
-              `Skipping ${batch.label} shard ${qIdx + 1}/${queries.length} after retry failure: ${error.message}`
+            // Fail-Fast Strategy
+            // Immediately stop execution. Do not waste API rate limits on subsequent shards/batches
+            // when this current batch is already structurally compromised.
+            throw new Error(
+              `Catastrophic execution failure in batch "${batch.label}" (Shard ${qIdx + 1}/${queries.length}) ` +
+              `after maximum retry attempts. Refusing partial dataset to protect database integrity. ` +
+              `Downstream error: ${error.message}`
             );
           }
         }
